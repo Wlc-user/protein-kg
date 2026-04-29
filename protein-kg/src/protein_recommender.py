@@ -16,7 +16,11 @@ class ProteinRecommender:
         for p in proteins:
             seq = p.get("sequence", "")
             if seq:
-                emb = embedding_service.encode_sequence(seq[:500])
+                key = seq[:50]
+                if key in embedding_service.cache:
+                    emb = embedding_service.cache[key]
+                else:
+                    emb = embedding_service.encode_one(seq)
             else:
                 emb = np.random.randn(128).astype(np.float32)
             embeddings.append(emb)
@@ -26,11 +30,16 @@ class ProteinRecommender:
         self.index = faiss.IndexFlatIP(self.embeddings.shape[1])
         self.index.add(self.embeddings)
         print(f"推荐引擎就绪: {len(self.protein_ids)} 个蛋白质")
-    
     def recommend_by_sequence(self, query_sequence, top_k=10):
-        from embedding_service import ProteinEmbeddingService
-        service = ProteinEmbeddingService()
-        query_emb = service.encode_sequence(query_sequence[:500])
+        from fast_embed import FastEmbeddingService
+        service = FastEmbeddingService()
+        
+        key = query_sequence[:50]
+        if key in service.cache:
+            query_emb = service.cache[key]
+        else:
+            query_emb = service.encode_one(query_sequence)
+        
         query_emb = query_emb.reshape(1, -1).astype(np.float32)
         faiss.normalize_L2(query_emb)
         
@@ -42,7 +51,6 @@ class ProteinRecommender:
                 pid = self.protein_ids[idx]
                 results.append({
                     "protein_id": pid,
-                    "similarity": round(float(dist), 4),
-                    "rank_source": "sequence_similarity"
+                    "similarity": round(float(dist), 4)
                 })
         return results[:top_k]
