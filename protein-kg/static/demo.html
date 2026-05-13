@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蛋白质多模态检索引擎</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+        .container {
+            width: 100%;
+            max-width: 900px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 2rem;
+        }
+        h1 {
+            text-align: center;
+            color: #2d3748;
+            margin-bottom: 1.5rem;
+            font-size: 2rem;
+        }
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 0.8rem;
+            background: #edf2f7;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #4a5568;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            background: #667eea;
+            color: white;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .search-area {
+            background: #f7fafc;
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .hidden { display: none; }
+        textarea, input {
+            width: 100%;
+            padding: 0.8rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            resize: vertical;
+            margin-bottom: 1rem;
+            transition: border 0.2s;
+        }
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+        button:hover { background: #5a67d8; }
+        button:active { transform: scale(0.98); }
+        button:disabled { background: #a0aec0; cursor: not-allowed; }
+        .results-section {
+            background: #f7fafc;
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 0.5rem;
+        }
+        .card-id {
+            font-weight: 700;
+            color: #2d3748;
+            font-size: 0.9rem;
+        }
+        .card-similarity {
+            background: #667eea;
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .card-name {
+            color: #4a5568;
+            font-size: 0.85rem;
+            margin-bottom: 0.2rem;
+        }
+        .card-length {
+            color: #a0aec0;
+            font-size: 0.75rem;
+        }
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 1rem;
+        }
+        .error {
+            color: #e53e3e;
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            padding: 0.8rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+        .loading {
+            text-align: center;
+            color: #718096;
+            font-style: italic;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 1rem; }
+            h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔬 蛋白质多模态检索引擎</h1>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('sequence')">🧬 序列相似搜索</button>
+        <button class="tab-btn" onclick="switchTab('function')">📖 功能语义搜索</button>
+    </div>
+
+    <!-- 序列搜索区域 -->
+    <div id="tab-sequence" class="search-area">
+        <textarea id="seq-input" rows="4" placeholder="输入蛋白质序列..."></textarea>
+        <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+            <button id="search-seq-btn" onclick="searchBySequence()">🔍 搜索相似蛋白</button>
+            <span style="color:#a0aec0; font-size:0.9rem;">示例一键填入</span>
+            <button style="background:#e2e8f0; color:#2d3748;" onclick="fillExampleSeq()">P53 片段</button>
+        </div>
+    </div>
+
+    <!-- 功能搜索区域 -->
+    <div id="tab-function" class="search-area hidden">
+        <input type="text" id="func-input" placeholder="输入功能关键词，如 kinase, ATP binding, ion channel...">
+        <button id="search-func-btn" onclick="searchByFunction()">🔍 语义搜索</button>
+    </div>
+
+    <!-- 结果展示 -->
+    <div id="results-section" class="results-section hidden">
+        <h3 style="margin-bottom:1rem; color:#2d3748;">📊 搜索结果</h3>
+        <div class="chart-container">
+            <canvas id="similarityChart" height="200"></canvas>
+        </div>
+        <div id="card-list" class="card-list"></div>
+        <div id="error-msg" class="error hidden"></div>
+    </div>
+
+    <div style="text-align:center; color:#a0aec0; font-size:0.8rem; margin-top:1rem;">
+        Powered by ESM-2 + Faiss + DSSM (BioBERT + ESM-2)
+    </div>
+</div>
+
+<script>
+    const API_BASE = 'http://localhost:8000';
+    let currentTab = 'sequence'; // 或 'function'
+    let chartInstance = null;
+
+    // 切换标签
+    function switchTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        if (tab === 'sequence') {
+            document.querySelector('.tab-btn').classList.add('active');
+            document.getElementById('tab-sequence').classList.remove('hidden');
+            document.getElementById('tab-function').classList.add('hidden');
+        } else {
+            document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            document.getElementById('tab-function').classList.remove('hidden');
+            document.getElementById('tab-sequence').classList.add('hidden');
+        }
+        // 清空之前的结果
+        document.getElementById('results-section').classList.add('hidden');
+        destroyChart();
+    }
+
+    // 填入示例序列
+    function fillExampleSeq() {
+        document.getElementById('seq-input').value = 'MEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDIEQWFTEDPGPDEAPRMPEAAPPVAPAPAAPTPAAPAPAPSWPLSSSVPSQKTYQGSYGFRLGFLHSGTAKSVTCTYSPALNKMFCQLAKTCPVQLWVDSTPPPGTRVRAMAIYKQSQHMTEVVRRCPHHERCSDSDGLAPPQHLIRVEGNLRVEYLDDRNTFRHSVVVPYEPPEVGSDCTTIHYNYMCNSSCMGGMNRRPILTIITLEDSSGNLLGRNSFEVRVCACPGRDRRTEEENLRKKGEPHHELPPGSTKRALPNNTSSSPQPKKKPL';
+    }
+
+    // 序列搜索
+    async function searchBySequence() {
+        const seq = document.getElementById('seq-input').value.trim();
+        if (!seq) {
+            showError('请输入蛋白质序列');
+            return;
+        }
+        const btn = document.getElementById('search-seq-btn');
+        btn.disabled = true;
+        btn.textContent = '搜索中...';
+        clearResults();
+        try {
+            const resp = await fetch(`${API_BASE}/search`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({sequence: seq, top_k: 5})
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            displayResults(data, 'sequence');
+        } catch (e) {
+            showError('搜索失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔍 搜索相似蛋白';
+        }
+    }
+
+    // 功能搜索
+    async function searchByFunction() {
+        const q = document.getElementById('func-input').value.trim();
+        if (!q) {
+            showError('请输入功能关键词');
+            return;
+        }
+        const btn = document.getElementById('search-func-btn');
+        btn.disabled = true;
+        btn.textContent = '搜索中...';
+        clearResults();
+        try {
+            const resp = await fetch(`${API_BASE}/search/function?q=${encodeURIComponent(q)}&top_k=5`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            // 兼容 {results: [...]} 或直接返回[...]
+            const results = data.results || data;
+            displayResults(results, 'function');
+        } catch (e) {
+            showError('搜索失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔍 语义搜索';
+        }
+    }
+
+    // 展示结果
+    function displayResults(data, type) {
+        const section = document.getElementById('results-section');
+        section.classList.remove('hidden');
+        const cardList = document.getElementById('card-list');
+        cardList.innerHTML = '';
+        const items = Array.isArray(data) ? data : data.results || [];
+        if (items.length === 0) {
+            cardList.innerHTML = '<p style="color:#a0aec0; text-align:center;">没有找到匹配的蛋白质</p>';
+            return;
+        }
+
+        // 构建卡片
+        items.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            const id = item.protein_id || item.uniprot_id || '';
+            const name = item.name || item.protein_name || '未命名';
+            const score = item.similarity || item.score || 0;
+            const length = item.length || '';
+            card.innerHTML = `
+                <div class="card-header">
+                    <span class="card-id">${id}</span>
+                    <span class="card-similarity">${score.toFixed(4)}</span>
+                </div>
+                <div class="card-name">${name}</div>
+                ${length ? `<div class="card-length">长度: ${length} aa</div>` : ''}
+            `;
+            cardList.appendChild(card);
+        });
+
+        // 绘制图表
+        drawChart(items);
+    }
+
+    // 绘制相似度柱状图
+    function drawChart(items) {
+        const ctx = document.getElementById('similarityChart').getContext('2d');
+        destroyChart(); // 销毁旧图表
+        const labels = items.map(i => i.protein_id || i.uniprot_id || '');
+        const values = items.map(i => i.similarity || i.score || 0);
+
+        if (typeof Chart === 'undefined') {
+            // Chart.js 未加载，降级为表格
+            document.querySelector('.chart-container').innerHTML = `
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr style="background:#edf2f7;"><th style="padding:0.5rem;">蛋白质ID</th><th>相似度</th></tr>
+                    ${labels.map((l, i) => `<tr><td style="padding:0.5rem;">${l}</td><td>${values[i].toFixed(4)}</td></tr>`).join('')}
+                </table>
+            `;
+            return;
+        }
+
+        chartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '相似度',
+                    data: values,
+                    backgroundColor: values.map((v, i) => {
+                        const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe'];
+                        return colors[i % colors.length];
+                    }),
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `相似度: ${ctx.raw.toFixed(4)}`
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: '相似度' }
+                    }
+                }
+            }
+        });
+    }
+
+    function destroyChart() {
+        if (chartInstance) {
+            chartInstance.destroy();
+            chartInstance = null;
+        }
+    }
+
+    function clearResults() {
+        document.getElementById('results-section').classList.remove('hidden');
+        document.getElementById('card-list').innerHTML = '<div class="loading">正在搜索...</div>';
+        document.getElementById('error-msg').classList.add('hidden');
+        destroyChart();
+        // 清空画布
+        const canvas = document.getElementById('similarityChart');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function showError(msg) {
+        document.getElementById('results-section').classList.remove('hidden');
+        const errDiv = document.getElementById('error-msg');
+        errDiv.textContent = msg;
+        errDiv.classList.remove('hidden');
+    }
+
+    // 默认填入示例序列，方便演示
+    window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('seq-input').value = 'MEEPQSDPSVEPPLSQETFSDLWKLL';
+    });
+</script>
+</body>
+</html>

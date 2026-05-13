@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: protein_kg_neo4j
+    ports:
+      - "7474:7474"   # 浏览器访问端口
+      - "7687:7687"   # Bolt协议端口（Python连接用）
+    environment:
+      - NEO4J_AUTH=neo4j/protein123  # 用户名/密码
+      - NEO4J_PLUGINS=["apoc"]       # 可选插件
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+
+volumes:
+  neo4j_data:
+  neo4j_logs:

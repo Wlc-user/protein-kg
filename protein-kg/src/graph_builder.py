@@ -1,147 +1,137 @@
 """
-蛋白质知识图谱构建器：Neo4j 存储 + Cypher 查询
+知识图谱构建器 - 整合NER和Neo4j存储
 """
-from neo4j import GraphDatabase
-from typing import Dict, List
-import json
+from typing import List, Dict, Optional
+from .ner_extractor import get_ner
+from .kg_storage import Neo4jKG
+import logging
 
-class ProteinGraphBuilder:
-    """将蛋白质数据存入 Neo4j 图数据库"""
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class KnowledgeGraphBuilder:
+    def __init__(self, ner_mode: str = "biobert", neo4j_uri: str = "bolt://localhost:7687"):
+        """
+        初始化图谱构建器
+        
+        参数:
+            ner_mode: "biobert" 或 "simple"
+            neo4j_uri: Neo4j连接地址
+        """
+        self.ner = get_ner(ner_mode)
+        self.kg = Neo4jKG(uri=neo4j_uri)
+        self.kg_connected = False
     
-    def __init__(self, uri="bolt://localhost:7687", user="neo4j", password="password"):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
-        self._init_indexes()
+    def connect(self):
+        """连接到Neo4j"""
+        self.kg_connected = self.kg.connect()
+        if not self.kg_connected:
+            logger.warning("Neo4j未连接，数据将只打印不存储")
+        return self.kg_connected
     
-    def _init_indexes(self):
-        """创建索引加速查询"""
-        with self.driver.session() as session:
-            session.run("CREATE INDEX IF NOT EXISTS FOR (p:Protein) ON (p.id)")
-            session.run("CREATE INDEX IF NOT EXISTS FOR (g:Gene) ON (g.name)")
-            session.run("CREATE INDEX IF NOT EXISTS FOR (o:Organism) ON (o.name)")
+    def process_text(self, text: str, source_id: str = "unknown", store: bool = True) -> Dict:
+        """
+        处理单条文本，提取实体关系并存储
+        
+        参数:
+            text: 输入文本
+            source_id: 数据来源标识
+            store: 是否存储到Neo4j
+        
+        返回: 提取结果统计
+        """
+        logger.info(f"处理文本 [{source_id}]: {text[:100]}...")
+        
+        # 提取实体
+        entities = self.ner.extract_with_positions(text)
+        logger.info(f"  提取到 {len(entities)} 个实体")
+        
+        # 提取关系
+        relations = self.ner.extract_relations(text)
+        logger.info(f"  提取到 {len(relations)} 个关系")
+        
+        # 存储到Neo4j
+        if store and self.kg_connected:
+            for ent in entities:
+                self.kg.create_node(ent[0], ent[1])
+            for rel in relations:
+                self.kg.create_relation(rel[0], rel[2], rel[1])
+        
+        return {
+            "source_id": source_id,
+            "entities": [(e[0], e[1]) for e in entities],
+            "relations": relations,
+            "entity_count": len(entities),
+            "relation_count": len(relations)
+        }
     
-    def import_protein(self, protein_data: Dict):
-        """导入单个蛋白质及其关系"""
-        with self.driver.session() as session:
-            # 创建蛋白质节点
-            session.run("""
-                MERGE (p:Protein {id: $id})
-                SET p.name = $name,
-                    p.sequence = $sequence,
-                    p.length = $length,
-                    p.function = $function
-            """, 
-                id=protein_data["id"],
-                name=protein_data["name"],
-                sequence=protein_data.get("sequence", ""),
-                length=protein_data.get("length", 0),
-                function="; ".join(protein_data.get("function", []))[:1000]
+    def process_batch(self, texts: List[Dict], store: bool = True) -> List[Dict]:
+        """
+        批量处理文本
+        
+        参数:
+            texts: 文本列表，每个元素含 {"id": "...", "text": "..."}
+            store: 是否存储
+        
+        返回: 所有结果列表
+        """
+        results = []
+        for item in texts:
+            result = self.process_text(
+                text=item.get("text", ""),
+                source_id=item.get("id", "unknown"),
+                store=store
             )
-            
-            # 创建基因节点和关系
-            if protein_data.get("gene"):
-                session.run("""
-                    MATCH (p:Protein {id: $pid})
-                    MERGE (g:Gene {name: $gene})
-                    MERGE (p)-[:ENCODED_BY]->(g)
-                """, pid=protein_data["id"], gene=protein_data["gene"])
-            
-            # 创建物种节点和关系
-            if protein_data.get("organism"):
-                session.run("""
-                    MATCH (p:Protein {id: $pid})
-                    MERGE (o:Organism {name: $org})
-                    MERGE (p)-[:FROM_ORGANISM]->(o)
-                """, pid=protein_data["id"], org=protein_data["organism"])
-            
-            # 创建亚细胞定位关系
-            for loc in protein_data.get("subcellular_location", []):
-                session.run("""
-                    MATCH (p:Protein {id: $pid})
-                    MERGE (l:Location {name: $loc})
-                    MERGE (p)-[:LOCATED_IN]->(l)
-                """, pid=protein_data["id"], loc=loc)
-            
-            # 创建蛋白质相互作用关系
-            for interactor in protein_data.get("interactors", []):
-                partner_id = interactor.get("partner")
-                if partner_id:
-                    session.run("""
-                        MATCH (p1:Protein {id: $pid})
-                        MERGE (p2:Protein {id: $partner})
-                        MERGE (p1)-[:INTERACTS_WITH {type: $itype}]->(p2)
-                    """, pid=protein_data["id"], partner=partner_id, itype=interactor.get("type", "unknown"))
+            results.append(result)
+        
+        # 打印汇总
+        total_entities = sum(r["entity_count"] for r in results)
+        total_relations = sum(r["relation_count"] for r in results)
+        logger.info("=" * 50)
+        logger.info(f"批量处理完成:")
+        logger.info(f"  文本数: {len(results)}")
+        logger.info(f"  实体总数: {total_entities}")
+        logger.info(f"  关系总数: {total_relations}")
+        
+        return results
     
-    def import_batch(self, proteins: List[Dict]):
-        """批量导入蛋白质数据"""
-        for i, protein in enumerate(proteins):
-            try:
-                self.import_protein(protein)
-                print(f"  ✅ [{i+1}/{len(proteins)}] {protein['id']}: {protein['name'][:40]}")
-            except Exception as e:
-                print(f"  ❌ [{i+1}/{len(proteins)}] {protein['id']}: {e}")
+    def query(self, entity_name: str, depth: int = 2) -> List[Dict]:
+        """查询实体的关联网络"""
+        if not self.kg_connected:
+            logger.error("Neo4j未连接，无法查询")
+            return []
+        return self.kg.query_protein_network(entity_name, depth)
     
-    def query_ppi_network(self, protein_id: str, depth: int = 1) -> List[Dict]:
-        """查询蛋白质相互作用网络"""
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (p:Protein {id: $id})-[r:INTERACTS_WITH]-(neighbor:Protein)
-                RETURN p.id AS source, p.name AS source_name, 
-                       type(r) AS relation, r.type AS detail,
-                       neighbor.id AS target, neighbor.name AS target_name
-                LIMIT 50
-            """, id=protein_id)
-            return [record.data() for record in result]
-    
-    def query_by_function(self, keyword: str) -> List[Dict]:
-        """按功能搜索蛋白质"""
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (p:Protein)
-                WHERE p.function CONTAINS $keyword
-                RETURN p.id AS id, p.name AS name, p.function AS function
-                LIMIT 20
-            """, keyword=keyword)
-            return [record.data() for record in result]
-    
-    def get_statistics(self) -> Dict:
+    def get_stats(self) -> Dict:
         """获取图谱统计信息"""
-        with self.driver.session() as session:
-            proteins = session.run("MATCH (p:Protein) RETURN count(p) AS cnt").single()["cnt"]
-            genes = session.run("MATCH (g:Gene) RETURN count(g) AS cnt").single()["cnt"]
-            interactions = session.run("MATCH ()-[r:INTERACTS_WITH]->() RETURN count(r) AS cnt").single()["cnt"]
-            return {
-                "total_proteins": proteins,
-                "total_genes": genes,
-                "total_interactions": interactions
-            }
+        if not self.kg_connected:
+            return {}
+        return self.kg.get_stats()
     
     def close(self):
-        self.driver.close()
+        """关闭连接"""
+        if self.kg_connected:
+            self.kg.close()
 
 
-if __name__ == "__main__":
-    from data_loader import ProteinDataLoader
+if __name__ == '__main__':
+    # 测试
+    builder = KnowledgeGraphBuilder(ner_mode="simple")  # 先用simple模式测试
+    builder.connect()
     
-    print("🔬 蛋白质知识图谱构建演示")
-    print("="*50)
+    test_texts = [
+        {"id": "test1", "text": "BRCA1 interacts with TP53 in breast cancer."},
+        {"id": "test2", "text": "EGFR mutations cause lung cancer."}
+    ]
     
-    # 1. 加载真实蛋白质数据
-    loader = ProteinDataLoader()
-    proteins = loader.fetch_batch(["P04637", "P38398", "P00533"])
+    results = builder.process_batch(test_texts, store=True)
+    print("\n处理结果:")
+    for r in results:
+        print(f"  {r['source_id']}: {r['entity_count']} 实体, {r['relation_count']} 关系")
     
-    # 2. 导入 Neo4j
-    print("\n📊 导入 Neo4j 图数据库...")
-    builder = ProteinGraphBuilder(uri="bolt://localhost:7687", user="neo4j", password="password")
-    builder.import_batch(proteins)
-    
-    # 3. 查询统计
-    stats = builder.get_statistics()
-    print(f"\n📈 图谱统计: {json.dumps(stats, indent=2)}")
-    
-    # 4. 查询 P53 的相互作用网络
-    print(f"\n🔗 P53 (P04637) 相互作用网络:")
-    network = builder.query_ppi_network("P04637")
-    for edge in network[:5]:
-        print(f"  {edge['source_name']} → {edge['target_name']}")
+    if builder.kg_connected:
+        stats = builder.get_stats()
+        print(f"\n图谱统计: {stats}")
     
     builder.close()

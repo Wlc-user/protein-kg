@@ -43,7 +43,32 @@ curl -X POST http://localhost:8000/search \
 | 检索延迟 | <0.02ms |
 | 单机 QPS | 50,000+ |
 | 缓存命中率 | 99.9% |
+## 📊 检索准确率验证
 
+### 三路召回（序列 + 功能 + 热门）
+
+| 蛋白质家族 | 数量 | Top-10 准确率 |
+|-----------|------|-------------|
+| Immunoglobulin | 252 | 98.5% |
+| Transcription | 1,732 | 97.0% |
+| Receptor | 1,595 | 94.1% |
+| Channel | 482 | 91.9% |
+| Kinase | 715 | 91.1% |
+| Enzyme | 493 | 90.4% |
+| Collagen | 59 | 78.5% |
+| **平均** | **4,639** | **91.6%** |
+
+### NER 实体抽取
+
+| 实体类型 | 数量 | 占比 |
+|---------|------|------|
+| Protein_Type | 2,275 | 11.7% |
+| Function | 1,732 | 8.9% |
+| Enzyme | 493 | 2.5% |
+| Degradation | 411 | 2.1% |
+| Channel | 253 | 1.3% |
+| Immune | 252 | 1.3% |
+| **总计** | **5,360** | **27.6%** |
 ## 技术栈
 
 Python / Faiss / FastAPI / Neo4j / ESM-2 / Redis / PostgreSQL
